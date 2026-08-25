@@ -34,19 +34,68 @@ EKS 1.30 has no default storage provisioner — without this, every PVC stays
 ```bash
 eksctl utils associate-iam-oidc-provider --cluster coder-demo --region us-east-1 --approve
 
+# Establish OIDC Trust Between EKS and AWS IAM #
+Bash
+
 eksctl create iamserviceaccount \
   --name ebs-csi-controller-sa --namespace kube-system \
   --cluster coder-demo --region us-east-1 \
   --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
   --approve --role-only --role-name AmazonEKS_EBS_CSI_DriverRole_coder-demo
 
+####################
+What it is doing:
+
+Creates an AWS IAM Role named AmazonEKS_EBS_CSI_DriverRole_coder-demo.
+
+Attaches the AWS-managed policy AmazonEBSCSIDriverPolicy (which grants permissions for EC2 APIs like ec2:CreateVolume, ec2:AttachVolume, ec2:DeleteVolume, and ec2:ModifyVolume).
+
+Establishes a trust relationship scoped strictly to the ServiceAccount ebs-csi-controller-sa in the kube-system namespace.
+
+The --role-only flag creates the IAM Role in AWS without generating a local ServiceAccount YAML file (the EKS add-on step will bind to it directly).
+
+#########################################################################
+
 ROLE_ARN=$(aws iam get-role --role-name AmazonEKS_EBS_CSI_DriverRole_coder-demo --query 'Role.Arn' --output text)
+
+###################################################################################
+Queries the AWS IAM API for the exact Amazon Resource Name (ARN) of the role created in Step 2 and stores it in the environment variable $ROLE_ARN (e.g., arn:aws:iam::123456789012:role/AmazonEKS_EBS_CSI_DriverRole_coder-demo).
+
+##########################################################################################################
 
 eksctl create addon --cluster coder-demo --region us-east-1 \
   --name aws-ebs-csi-driver --service-account-role-arn "$ROLE_ARN" --force
 
+##################################################################################
+What it is doing:
+Installs the official Amazon-managed aws-ebs-csi-driver add-on into the cluster and links its controller deployment to the IAM Role via the ServiceAccount. The --force flag allows eksctl to overwrite any existing or conflicting driver metadata cleanly.
+
+Why it is needed:
+Kubernetes removed the legacy in-tree AWS volume plugin. The standalone Container Storage Interface (CSI) driver acts as the bridge between Kubernetes volume lifecycle events (creating PVCs/PVs) and AWS EBS storage APIs.
+
+
+##################################################################################################
+
 kubectl apply -f coder-demo/storageclass.yaml
 kubectl patch storageclass gp2 -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"false"}}}'
+
+#######################################################################################################
+
+Step 1: Establish OIDC Trust Between EKS and AWS IAM
+ we have created a link netween the aws IAM and the eks cluster if any oidc coming from this cluster can easily identified.
+
+Step 2: Create the IAM Role for the EBS CSI Driver
+created the iam role to the specific service account in the kubernets cluster so that the only service can talk to the ec2 api to create the EBS  or can ask to create the EBS.
+Step 3: Fetch the IAM Role ARN into a Shell Variable
+GETTINg the arn of the role into a variable.
+Step 4:Install the AWS EBS CSI Driver Add-on
+You aren't just adding a role here. You are actively installing the CSI driver software (the add-on deployment) into the Kubernetes cluster and linking that software to the IAM role you created in Step 2.
+Step 5: Define the Modern gp3 StorageClass (storageclass.yaml)
+modern storage definition that would be created in the AWS.
+Step 6: Apply the New StorageClass & Demote Legacy gp2
+Along with registering gp3, this step actively strips the default status from the legacy gp2 class. If you don't do this, Kubernetes will crash on new storage requests because it won't know which of the two defaults to use
+
+###############################################################################################################
 ```
 
 ## 3. Create the sandbox namespace + scoped RBAC
