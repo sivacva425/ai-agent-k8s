@@ -113,12 +113,15 @@ kubectl apply -f coder-demo/rbac.yaml
 ## 4. Install Postgres (Coder's database)
 
 ```bash
+# 1. Create the namespace (if not already created)
 kubectl create namespace coder
 
+# 2. Add chart repositories and update local index
 helm repo add bitnami https://charts.bitnami.com/bitnami
 helm repo add coder-v2 https://helm.coder.com/v2
 helm repo update
 
+# 3. Install the PostgreSQL database via Helm into your EKS cluster
 helm install coder-db bitnami/postgresql \
   --namespace coder \
   --set auth.username=coder \
@@ -127,6 +130,7 @@ helm install coder-db bitnami/postgresql \
   --set primary.persistence.size=10Gi \
   --wait --timeout 5m
 
+# 4. Create the Kubernetes Secret holding the database connection string
 kubectl create secret generic coder-db-url -n coder \
   --from-literal=url="postgres://coder:coderpass@coder-db-postgresql.coder.svc.cluster.local:5432/coder?sslmode=disable"
 ```
